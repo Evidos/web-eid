@@ -52,7 +52,7 @@ std::vector<unsigned char> PKCS11Module::attribute(CK_ATTRIBUTE_TYPE type, CK_SE
 {
     CK_ATTRIBUTE attr = {type, nullptr, 0};
     C(GetAttributeValue, sid, obj, &attr, 1UL);
-    std::vector<unsigned char> data(attr.ulValueLen, 0);
+    std::vector<unsigned char> data(attr.ulValueLen);
     attr.pValue = data.data();
     C(GetAttributeValue, sid, obj, &attr, 1UL);
     return data;
@@ -78,8 +78,8 @@ std::vector<CK_OBJECT_HANDLE> PKCS11Module::getKey(CK_SESSION_HANDLE session, co
     _log("Looking for key with id %s length %d", toHex(id).c_str(), id.size());
     CK_OBJECT_CLASS keyclass = CKO_PRIVATE_KEY;
     return objects({
-        {CKA_CLASS, &keyclass, (CK_ULONG)sizeof(keyclass)},
-        {CKA_ID, (void*)id.data(), (CK_ULONG)id.size()}
+        {CKA_CLASS, &keyclass, CK_ULONG(sizeof(keyclass))},
+        {CKA_ID, (void*)id.data(), CK_ULONG(id.size())}
     }, session, 1);
 }
 
@@ -98,7 +98,7 @@ CK_RV PKCS11Module::load(const std::string &module) {
 #ifdef __linux__
         // Get path to library location, if just a name
         if (path.find_first_of("/\\") == std::string::npos) {
-            std::vector<char> path(1024, 0);
+            std::vector<char> path(1024);
             if (dlinfo(library,  RTLD_DI_ORIGIN, path.data()) == 0) {
                 std::string p(path.begin(), path.end());
                 _log("Loaded %s from %s", module.c_str(), p.c_str());
@@ -119,9 +119,8 @@ CK_RV PKCS11Module::load(const std::string &module) {
     CK_RV rv = C(Initialize, nullptr);
     if (rv != CKR_OK && rv != CKR_CRYPTOKI_ALREADY_INITIALIZED) {
         return rv;
-    } else {
-        initialized = rv != CKR_CRYPTOKI_ALREADY_INITIALIZED;
     }
+    initialized = rv != CKR_CRYPTOKI_ALREADY_INITIALIZED;
 
     return refresh();
 }
@@ -129,28 +128,20 @@ CK_RV PKCS11Module::load(const std::string &module) {
 // See if tokens have appeared or disappeared
 CK_RV PKCS11Module::refresh() {
     // Locate all slots with tokens
-    std::vector<CK_SLOT_ID> slots_with_tokens;
     CK_ULONG slotCount = 0;
-    check_C(GetSlotList, CK_TRUE, nullptr, &slotCount);
+    check_C(GetSlotList, CK_BBOOL(CK_TRUE), nullptr, &slotCount);
     _log("slotCount = %i", slotCount);
-    slots_with_tokens.resize(slotCount);
-    check_C(GetSlotList, CK_TRUE, slots_with_tokens.data(), &slotCount);
+    std::vector<CK_SLOT_ID> slots_with_tokens(slotCount);
+    check_C(GetSlotList, CK_BBOOL(CK_TRUE), slots_with_tokens.data(), &slotCount);
     // Remove any certificates that were in tokens that do not exist any more
     std::set<std::vector<unsigned char>> leftovers;
     for (auto &c: certs) {
         auto sid = c.second.first.slot;
-        bool found = false;
-        for (auto &t: slots_with_tokens) {
-            if (t == sid) {
-                _log("Still present");
-                found = true;
-                break;
-            }
-        }
         // remove
-        if (!found) {
+        if (std::none_of(slots_with_tokens.cbegin(), slots_with_tokens.cend(), [sid](CK_SLOT_ID t){ return t == sid; }))
             leftovers.insert(c.first);
-        }
+        else
+            _log("Still present");
     }
     for (const auto &l: leftovers) {
         certs.erase(l);
@@ -184,7 +175,7 @@ CK_RV PKCS11Module::refresh() {
             std::vector<unsigned char> certid = attribute(CKA_ID, sid, handle);
             _log("Found certificate: %s %s", x509subject(certCandidate).c_str(), toHex(certid).c_str());
             // add to map
-            certs[certCandidate] = std::make_pair(P11Token({(int)token.ulMinPinLen, (int)token.ulMaxPinLen, label, (bool)(token.flags & CKF_PROTECTED_AUTHENTICATION_PATH), slot, token.flags}), certid);
+            certs[certCandidate] = std::make_pair(P11Token({int(token.ulMinPinLen), int(token.ulMaxPinLen), label, bool(token.flags & CKF_PROTECTED_AUTHENTICATION_PATH), slot, token.flags, {}}), certid);
         }
         // Close session with this slot. We ignore errors here
         C(CloseSession, sid);
@@ -218,7 +209,7 @@ CK_RV PKCS11Module::login(const std::vector<unsigned char> &cert, const char *pi
         _log("Using key from slot %d with ID %s", slot.first.slot, toHex(slot.second).c_str());
         check_C(OpenSession, token.slot, CKF_SERIAL_SESSION, nullptr, nullptr, &session);
     }
-    check_C(Login, session, CKU_USER, (unsigned char*)pin, pin ? strlen(pin) : 0);
+    check_C(Login, session, CKU_USER, CK_UTF8CHAR_PTR(pin), pin ? strlen(pin) : 0);
 
     return CKR_OK;
 }
@@ -250,27 +241,34 @@ CK_RV PKCS11Module::sign(const std::vector<unsigned char> &cert, const std::vect
         return CKR_OBJECT_HANDLE_INVALID;
     }
 
-    CK_MECHANISM mechanism = {CKM_RSA_PKCS, 0, 0};
+    CK_KEY_TYPE keyType = CKK_RSA;
+    CK_ATTRIBUTE attribute = { CKA_KEY_TYPE, &keyType, sizeof(keyType) };
+    check_C(GetAttributeValue, session, key[0], &attribute, 1);
+
+    CK_MECHANISM mechanism = {keyType == CKK_ECDSA ? CKM_ECDSA : CKM_RSA_PKCS, nullptr, 0};
     check_C(SignInit, session, &mechanism, key[0]);
     std::vector<unsigned char> hashWithPadding;
-    // FIXME: explicit hash type argument
-    switch (hash.size()) {
-    case BINARY_SHA224_LENGTH:
-        hashWithPadding = {0x30, 0x2d, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x04, 0x05, 0x00, 0x04, 0x1c};
-        break;
-    case BINARY_SHA256_LENGTH:
-        hashWithPadding = {0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20};
-        break;
-    case BINARY_SHA384_LENGTH:
-        hashWithPadding = {0x30, 0x41, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05, 0x00, 0x04, 0x30};
-        break;
-    case BINARY_SHA512_LENGTH:
-        hashWithPadding = {0x30, 0x51, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05, 0x00, 0x04, 0x40};
-        break;
-    default:
-        _log("incorrect digest length, dropping padding");
+    if(keyType == CKK_RSA)
+    {
+        // FIXME: explicit hash type argument
+        switch (hash.size()) {
+        case BINARY_SHA224_LENGTH:
+            hashWithPadding = {0x30, 0x2d, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x04, 0x05, 0x00, 0x04, 0x1c};
+            break;
+        case BINARY_SHA256_LENGTH:
+            hashWithPadding = {0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20};
+            break;
+        case BINARY_SHA384_LENGTH:
+            hashWithPadding = {0x30, 0x41, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05, 0x00, 0x04, 0x30};
+            break;
+        case BINARY_SHA512_LENGTH:
+            hashWithPadding = {0x30, 0x51, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05, 0x00, 0x04, 0x40};
+            break;
+        default:
+            _log("incorrect digest length, dropping padding");
+        }
     }
-    hashWithPadding.insert(hashWithPadding.end(), hash.begin(), hash.end());
+    hashWithPadding.insert(hashWithPadding.cend(), hash.cbegin(), hash.cend());
     CK_ULONG signatureLength = 0;
 
     // Get response size
