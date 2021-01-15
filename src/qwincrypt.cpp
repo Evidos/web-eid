@@ -222,11 +222,11 @@ QWinCrypt::ErroredResponse QWinCrypt::selectCertificate(CertificatePurpose type,
     return {CKR_OK, {result}};
 }
 
-QWinCrypt::ErroredResponse QWinCrypt::sign(const QByteArray &cert, const QByteArray &hash, const HashType hashtype, const HWND parent) {
+QWinCrypt::ErroredResponse QWinCrypt::sign(const QByteArray &cert, const QByteArray &hash, const HashType /*hashtype*/, const HWND parent) {
     _log("Cert for signing is: %s", qPrintable(cert.toHex()));
     QByteArray result;
     CK_RV rv = CKR_OK;
-    BCRYPT_PKCS1_PADDING_INFO padInfo;
+    BCRYPT_PKCS1_PADDING_INFO padInfo = {};
     DWORD obtainKeyStrategy = CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG;
 
     ALG_ID alg = 0;
@@ -250,7 +250,7 @@ QWinCrypt::ErroredResponse QWinCrypt::sign(const QByteArray &cert, const QByteAr
         alg = CALG_SHA_512;
         break;
     default:
-        return {CKR_ARGUMENTS_BAD};
+        return {CKR_ARGUMENTS_BAD, {}};
     }
 
     SECURITY_STATUS err = 0;
@@ -260,7 +260,7 @@ QWinCrypt::ErroredResponse QWinCrypt::sign(const QByteArray &cert, const QByteAr
     HCERTSTORE store = CertOpenSystemStore(0, L"MY");
     if (!store) {
         _log("Could not open MY store"); // TODO lasterror
-        return {CKR_GENERAL_ERROR};
+        return {CKR_GENERAL_ERROR, {}};
     }
 
     PCCERT_CONTEXT certFromBinary = CertCreateCertificateContext(X509_ASN_ENCODING, PBYTE(cert.data()), cert.size());
@@ -269,7 +269,7 @@ QWinCrypt::ErroredResponse QWinCrypt::sign(const QByteArray &cert, const QByteAr
 
     if (!certInStore) {
         CertCloseStore(store, 0);
-        return {CKR_KEY_NEEDED}; // FIXME: TBS
+        return {CKR_KEY_NEEDED, {}}; // FIXME: TBS
     }
 
     DWORD flags = obtainKeyStrategy | CRYPT_ACQUIRE_COMPARE_KEY_FLAG | CRYPT_ACQUIRE_WINDOW_HANDLE_FLAG;
@@ -286,9 +286,9 @@ QWinCrypt::ErroredResponse QWinCrypt::sign(const QByteArray &cert, const QByteAr
         DWORD e = GetLastError();
         _log("Did not get key: 0x%08x", e);
         if (SCARD_W_CANCELLED_BY_USER == e) {
-            return {CKR_FUNCTION_CANCELED};
+            return {CKR_FUNCTION_CANCELED, {}};
         } else {
-            return {CKR_GENERAL_ERROR};
+            return {CKR_GENERAL_ERROR, {}};
         }
     }
     // Certificate not needed any more, key handle acquired
@@ -296,7 +296,14 @@ QWinCrypt::ErroredResponse QWinCrypt::sign(const QByteArray &cert, const QByteAr
     {
     case CERT_NCRYPT_KEY_SPEC:
     {
-        err = NCryptSignHash(key, &padInfo, PBYTE(hash.data()), DWORD(hash.size()), PBYTE(result.data()), DWORD(result.size()), (DWORD*)&size, BCRYPT_PAD_PKCS1);
+        DWORD algosize = 0;
+        std::wstring algo(5, 0);
+        err = NCryptGetProperty(key, NCRYPT_ALGORITHM_GROUP_PROPERTY, PBYTE(algo.data()), DWORD(algo.size() + 1) * 2, &algosize, 0);
+        algo.resize(algosize / 2 - 1);
+        bool isRSA = algo == L"RSA";
+
+        err = NCryptSignHash(key, isRSA ? &padInfo : nullptr, PBYTE(hash.data()), DWORD(hash.size()),
+            PBYTE(result.data()), DWORD(result.size()), (DWORD*)&size, isRSA ? BCRYPT_PAD_PKCS1 : 0);
         if (freeKeyHandle) {
             NCryptFreeObject(key);
         }
@@ -311,7 +318,7 @@ QWinCrypt::ErroredResponse QWinCrypt::sign(const QByteArray &cert, const QByteAr
                 CryptReleaseContext(key, 0);
             }
             _log("CreateHash failed");
-            return {CKR_GENERAL_ERROR};
+            return {CKR_GENERAL_ERROR, {}};
         }
 
         if (!CryptSetHashParam(capihash, HP_HASHVAL, PBYTE(hash.data()), 0))	{
@@ -320,7 +327,7 @@ QWinCrypt::ErroredResponse QWinCrypt::sign(const QByteArray &cert, const QByteAr
             }
             CryptDestroyHash(capihash);
             _log("CryptSetHashParam failed");
-            return {CKR_GENERAL_ERROR};
+            return {CKR_GENERAL_ERROR, {}};
         }
 
         INT retCode = CryptSignHashW(capihash, AT_SIGNATURE, 0, 0, PBYTE(result.data()), &size);
@@ -337,7 +344,7 @@ QWinCrypt::ErroredResponse QWinCrypt::sign(const QByteArray &cert, const QByteAr
     }
     default:
         _log("Invalid key type (not CERT_NCRYPT_KEY_SPEC nor AT_SIGNATURE)");
-        return {CKR_GENERAL_ERROR};
+        return {CKR_GENERAL_ERROR, {}};
     }
 
     switch (err)

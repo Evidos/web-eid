@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.1.0)
 
-project(web-eid VERSION 19.05)
+project(web-eid VERSION 21.01)
 
 if(NOT DEFINED ENV{QTDIR})
 	message(FATAL_ERROR "QTDIR environment variable is not set!")
@@ -14,19 +14,10 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 set(INSTALL_BIN_PATH bin)
 
-find_package(Qt5Widgets CONFIG REQUIRED)
-find_package(Qt5Network CONFIG REQUIRED)
-find_package(Qt5WebSockets CONFIG REQUIRED)
-find_package(Qt5Concurrent CONFIG REQUIRED)
-find_package(Qt5Svg CONFIG REQUIRED)
+find_package(Qt5 REQUIRED COMPONENTS Core Widgets WebSockets Concurrent Svg)
 
 file(GLOB web-eid_SRCS src/*.cpp src/dialogs/*.h)
 set(web-eid_RESOURCES src/web-eid.qrc src/translations/strings.qrc)
-
-IF (MSVC)
-	add_definitions(-DUNICODE -D_UNICODE -DWIN32_LEAN_AND_MEAN)
-	set(LIBS winscard ncrypt crypt32 cryptui Advapi32)
-endif (MSVC)
 
 if (APPLE)
 	find_library(PCSC PCSC)
@@ -48,13 +39,10 @@ include_directories(src src/dialogs)
 add_definitions(-DVERSION="${PROJECT_VERSION}-evidos")
 add_definitions(-DGIT_REVISION="")
 
-IF (MSVC)
-	add_executable(web-eid WIN32 ${web-eid_SRCS} ${web-eid_RESOURCES})
-	
-elseif (APPLE)
-	add_executable(web-eid MACOSX_BUNDLE ${web-eid_SRCS} ${web-eid_RESOURCES})
-else()
-	add_executable(web-eid ${web-eid_SRCS} ${web-eid_RESOURCES})
+add_executable(web-eid WIN32 MACOSX_BUNDLE ${web-eid_SRCS} ${web-eid_RESOURCES})
+if(MSVC)
+    target_compile_definitions(web-eid PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+    target_link_libraries(web-eid winscard ncrypt crypt32 cryptui Advapi32)
 endif ()
 
 install(TARGETS web-eid DESTINATION ${INSTALL_BIN_PATH})
