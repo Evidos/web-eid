@@ -296,6 +296,9 @@ QWinCrypt::ErroredResponse QWinCrypt::sign(const QByteArray &cert, const QByteAr
     {
     case CERT_NCRYPT_KEY_SPEC:
     {
+        // https://docs.microsoft.com/en-us/archive/blogs/alejacma/smart-cards-pin-gets-cached
+        NCryptSetProperty(key, NCRYPT_PIN_PROPERTY, nullptr, 0, 0);
+
         err = NCryptSignHash(key, &padInfo, PBYTE(hash.data()), DWORD(hash.size()), PBYTE(result.data()), DWORD(result.size()), (DWORD*)&size, BCRYPT_PAD_PKCS1);
         if (freeKeyHandle) {
             NCryptFreeObject(key);
@@ -305,6 +308,9 @@ QWinCrypt::ErroredResponse QWinCrypt::sign(const QByteArray &cert, const QByteAr
     }
     case AT_SIGNATURE:
     {
+        // https://docs.microsoft.com/en-us/archive/blogs/alejacma/smart-cards-pin-gets-cached
+        CryptSetProvParam(key, PP_SIGNATURE_PIN, nullptr, 0);
+
         HCRYPTHASH capihash = 0;
         if (!CryptCreateHash(key, alg, 0, 0, &capihash)) {
             if (freeKeyHandle) {
