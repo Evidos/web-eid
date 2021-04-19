@@ -1,0 +1,40 @@
+name: CI
+on: [push, pull_request]
+env:
+  BUILD_NUMBER: ${{ github.run_number }}
+jobs:
+  windows:
+    name: Build on Windows
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x86,x64]
+        include:
+        - arch: x86
+          qt: win32_msvc2017
+        - arch: x64
+          qt: win64_msvc2017_64
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v2
+      with:
+        version: '5.12.10'
+        arch: ${{ matrix.qt }}
+    - name: Setup dev env
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: ${{ matrix.arch }}
+        sdk: 10.0.16299.0
+    - name: Build
+      run: |
+        mkdir build
+        cd build
+        cmake "-GNMake Makefiles" -DCMAKE_BUILD_TYPE=RelWithDebInfo ..
+        cmake --build . --target package
+    - name: Archive artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: msi
+        path: build/*.msi
