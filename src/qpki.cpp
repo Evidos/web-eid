@@ -145,9 +145,10 @@ void QPKI::refreshCAPI() {
                 if (certificates.contains(c)) {
                     _log("Already present!");
                 } else {
+                    _log("Parsing certificate");
                     QSslCertificate crt(c, QSsl::Der);
-                    QList<QString> cn = crt.subjectInfo(QSslCertificate::CommonName);
-                    _log("Adding certificate %s", qPrintable(cn.at(0)));
+                    QString cn = crt.subjectInfo(QSslCertificate::CommonName).join(' ');
+                    _log("Adding certificate %s", qPrintable(cn));
                     certificates[c] = P11Token({0,0,{0},0,0,0, "CAPI"});
                 }
             }
