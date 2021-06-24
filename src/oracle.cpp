@@ -59,8 +59,10 @@ static QList<ModuleATR> createMap() {
             {"CAPI", "/Library/latvia-eid/lib/otlv-pkcs11.so", "otlv-pkcs11.so"}
         },
         {   "Finnish ID-card",
-            {"3B7B940000806212515646696E454944"},
-            {"CAPI", "/Library/mPolluxDigiSign/libcryptoki.dylib", "opensc-pkcs11.so"}
+            {   "3B7B940000806212515646696E454944",
+                "3B7F9600008031B865B0850300EF1200F6829000"
+            },
+            {"CAPI", "/Library/mPolluxDigiSign/libcryptoki.dylib", "libcryptoki.so"}
         },
         {   "Lithuanian ID-card",
             {   "3BF81300008131FE45536D617274417070F8",
