@@ -94,18 +94,19 @@ public slots:
         this->certs = certs;
         // Change from some to none, interpret as implicit cancel
         // TODO: what about changing cards?
+        select->clear();
+        select->setVisible(certs.size() > 1);
         if (certs.empty()) {
             message->setText(tr("No certificates found, please insert your card!"));
-            select->hide();
             ok->hide();
             cancel->setDefault(true);
             cancel->setFocus();
         } else if (certs.size() == 1) {
-            select->hide();
             ok->setText(tr("OK"));
 
             QSslCertificate x509(certs.at(0), QSsl::Der);
             QString cname = certName(certs.at(0));
+            select->addItems({cname});
             if (QDateTime::currentDateTime() >= x509.expiryDate()) {
                 ok->setEnabled(false);
                 cancel->setDefault(true);
@@ -119,16 +120,11 @@ public slots:
                 message->setText(tr("Use %1 for %2?").arg(cname).arg(type == Authentication ? tr("authentication") : tr("signing")));
             }
         } else {
-            QStringList crts;
             message->setText(type == Authentication ? tr("Select certificate for authentication") : tr("Select certificate for signing"));
 
             for (const auto &c: certs) {
-                crts << certName(c);
+                select->addItem(certName(c));
             }
-
-            select->clear();
-            select->show();
-            select->addItems(crts);
 
             // Disable expired certs
             QStandardItemModel* model = qobject_cast<QStandardItemModel*>(select->model());
