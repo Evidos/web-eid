@@ -55,8 +55,10 @@ static QList<ModuleATR> createMap() {
             {"CAPI", "/Library/EstonianIDCard/lib/esteid-pkcs11.so", "/Library/OpenSC/lib/opensc-pkcs11.so", "opensc-pkcs11.so"}
         },
         {   "Latvian ID-card",
-            {"3BDD18008131FE45904C41545649412D65494490008C"},
-            {"CAPI", "/Library/latvia-eid/lib/otlv-pkcs11.so", "otlv-pkcs11.so"}
+            {   "3BDD18008131FE45904C41545649412D65494490008C",
+                "3BDB960080B1FE451F830012428F536549440F900020"
+            },
+            {"CAPI", "/Library/latvia-eid/lib/eidlv-pkcs11.bundle/Contents/MacOS/eidlv-pkcs11", "eidlv-pkcs11.so"}
         },
         {   "Finnish ID-card",
             {"3B7B940000806212515646696E454944"},
